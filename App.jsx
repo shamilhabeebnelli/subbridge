@@ -41,7 +41,7 @@ function App() {
   const plan = useMemo(() => C.plan(cues, engine), [cues, engine]);
   const sup = C.support(engine, target, libreCodes);
   const supSrc = source ? C.support(engine, source, libreCodes) : 'yes';
-  const host = engine === 'mymemory' ? 'api.mymemory.translated.net' : (libreUrl || 'your LibreTranslate server');
+  const host = engine === 'mymemory' ? 'api.mymemory.translated.net' : engine === 'local' ? 'huggingface.co and cdn.jsdelivr.net (model and runtime files only)' : (libreUrl || 'your LibreTranslate server');
 
   function reset() { setOut(new Map()); setManual({}); setProgress(null); setStatus(''); setConsent(false); }
   function load(text) {
@@ -68,22 +68,40 @@ function App() {
   async function checkLibre() {
     try { setLibreCodes(await C.libreLanguages(libreUrl, (u) => fetch(u))); setError(''); } catch (e) { setError('Could not read languages: ' + e.message); }
   }
+  const wk = useRef(null);
+  const lastLocalErr = useRef('');
+  function localTranslate(text, tgtCode, signal) {
+    if (!wk.current) {
+      let w; try { w = new Worker('worker.js', { type: 'module' }); } catch (e) { lastLocalErr.current = 'The offline engine could not start. Open the page from its web address (not a saved file) in a current browser. ' + e.message; throw new Error(lastLocalErr.current); }
+      wk.current = { w, n: 0, pending: new Map() };
+      w.onmessage = (e) => {
+        const m = e.data; const p = wk.current.pending.get(m.id);
+        if (m.type === 'progress') { setStatus(`Downloading the offline model (first use only, then cached): ${m.file.split('/').pop()} ${Math.round((m.loaded || 0) / 1048576)} of ${Math.round((m.total || 0) / 1048576)} MB`); return; }
+        if (!p) return;
+        wk.current.pending.delete(m.id);
+        if (m.type === 'done') p.res(m.text); else { lastLocalErr.current = m.error; p.rej(new Error(m.error)); }
+      };
+      w.onerror = (e) => { for (const p of wk.current.pending.values()) { lastLocalErr.current = 'The offline engine could not start. Open the page from its web address (not a saved file) in a current browser. ' + (e.message || ''); p.rej(new Error(lastLocalErr.current)); }; wk.current.pending.clear(); wk.current = null; };
+    }
+    const cur = wk.current; const id = ++cur.n;
+    return new Promise((res, rej) => { cur.pending.set(id, { res, rej }); cur.w.postMessage({ id, tgt: tgtCode, text }); signal?.addEventListener('abort', () => rej(new Error('stopped'))); });
+  }
   async function start() {
-    setError(''); setBusy(true); setStatus('Translating…'); etaBase.current = null; setEta({ state: 'start' });
+    setError(''); setBusy(true); setStatus('Translating…'); etaBase.current = null; lastLocalErr.current = ''; setEta({ state: 'start' });
     ac.current = new AbortController();
     try {
-      const translate = C.makeProvider(engine, { url: libreUrl }, (...a) => fetch(...a));
+      const translate = C.makeProvider(engine, { url: libreUrl, worker: localTranslate }, (...a) => fetch(...a));
       const have = new Map(out);
       const r = await C.run({
         cues, provider: engine, src: source ? source[C.PROVIDERS[engine].key] : 'auto', tgt: target[C.PROVIDERS[engine].key],
-        translate, signal: ac.current.signal, have, onProgress: (p) => { const now = Date.now(); if (!etaBase.current) etaBase.current = { t: now, done: p.done }; const sec = C.etaSeconds(etaBase.current, { t: now, done: p.done, total: p.total }); setEta(sec === null ? { state: 'estimating' } : { state: 'eta', sec, at: now + sec * 1000 }); setProgress(p); },
+        translate, signal: ac.current.signal, have, onProgress: (p) => { const now = Date.now(); if (!etaBase.current) etaBase.current = { t: now, done: p.done }; const sec = C.etaSeconds(etaBase.current, { t: now, done: p.done, total: p.total }); setEta(sec === null ? { state: 'estimating' } : { state: 'eta', sec, at: now + sec * 1000 }); setProgress(p); setStatus((s) => (s.startsWith('Downloading') ? 'Translating…' : s)); },
       });
       setOut(new Map(r.out));
       const left = cues.filter((c, i) => !C.cueTranslation(c, r.out, i).translated && C.cueSegments(c).length).length;
       if (r.stopped === 'quota') setStatus(`Stopped: the service's daily limit was reached. ${left}. You can continue later; finished cues are kept while this page stays open.`);
       else if (r.stopped?.startsWith('config:')) setStatus('Stopped: ' + r.stopped.slice(7));
       else if (r.stopped === 'stopped') setStatus(`Stopped. ${left}.`);
-      else setStatus(r.failed.length ? `Finished with ${r.failed.length} failed lines. Run again to retry them.` : 'Finished. Review the lines below before using them.');
+      else setStatus(r.failed.length ? `Finished with ${r.failed.length} failed lines. Run again to retry them.${engine === 'local' && lastLocalErr.current ? ' Offline engine said: ' + lastLocalErr.current.slice(0, 160) + ' (the model download may be blocked, or this browser cannot run it).' : ''}` : 'Finished. Review the lines below before using them.');
     } catch (e) { setStatus('Stopped: ' + e.message); }
     setBusy(false); setEta(null);
   }
@@ -124,9 +142,10 @@ function App() {
         </div>
         {engine === 'libre' && <div class="row"><input aria-label="LibreTranslate URL" placeholder="http://localhost:5000" value={libreUrl} onInput={(e) => setLibreUrl(e.target.value)} /><button onClick={checkLibre} disabled={!libreUrl}>Check languages</button></div>}
         <p class={'support ' + sup} aria-live="polite">
-          {sup === 'yes' && (engine === 'mymemory' ? `${target.name}: accepted by MyMemory. ${PROBED}` : `${target.name}: available on this server.`)}
+          {sup === 'yes' && engine === 'local' && `${target.name}: translated on this device with a small Opus-MT model. English subtitles only. First use downloads the model (about 100 MB, cached afterwards). No daily service limit from a service. Uses about 1.5 GB of memory on a desktop browser and can be slow or fail on a phone with little memory. Quality is not verified${target.id === 'chinese-simplified-' ? ' (Chinese sometimes repeats phrases, check every line)' : ''}.`}
+          {sup === 'yes' && engine !== 'local' && (engine === 'mymemory' ? `${target.name}: accepted by MyMemory. ${PROBED}` : `${target.name}: available on this server.`)}
           {sup === 'unknown' && `${target.name}: support is not known for this engine. Try a short test.`}
-          {sup === 'no' && (target.id === 'tulu' ? 'Tulu: no engine here supports it. Pick another language.' : `${target.name}: not available on this engine.`)}
+          {sup === 'no' && (target.id === 'tulu' ? 'Tulu: no engine here supports it. Pick another language.' : engine === 'local' ? `${target.name}: not available offline. Offline mode only has Hindi, Arabic, French, Spanish, Chinese and Indonesian. Pick one of those, or use another engine.` : `${target.name}: not available on this engine.`)}
           {supSrc === 'no' && ` Source language ${source.name} is not available on this engine.`}
         </p>
         <details><summary>Add a language code</summary>
@@ -137,14 +156,15 @@ function App() {
       <section>
         <h2>3. Translate</h2>
         {engine === 'mymemory' && plan.chars > 5000 && <p class="warn">This file has {plan.chars} characters. MyMemory's anonymous limit is about 5000 per day, so it will probably stop part way. Finished cues are kept.</p>}
-        <label class="check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand the subtitle text will be sent to {host}</label>
+        <label class="check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> {engine === 'local' ? 'I understand the model and runtime files are downloaded from huggingface.co and cdn.jsdelivr.net. The subtitle text stays on this device.' : `I understand the subtitle text will be sent to ${host}`}</label>
         <div class="row">
           <button class="primary" disabled={!cues.length || busy || !consent || sup === 'no' || supSrc === 'no'} onClick={start}>{anyDone ? 'Continue translating' : 'Translate'}</button>
           <button disabled={!busy} onClick={() => ac.current?.abort()}>Stop</button>
         </div>
         {progress && <progress max={progress.total} value={progress.done} aria-label="Progress" />}
         {status && <p aria-live="polite" class="status">{status}</p>}
-        {busy && eta && <p class="eta">{eta.state === 'eta' ? (eta.sec === 0 ? 'Almost done.' : `Estimated time left: ${C.fmtDuration(eta.sec)}, around ${new Date(eta.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Based on the speed so far on this device, so it can change.`) : 'Estimating time left… (needs a few seconds of progress)'}</p>}
+        {busy && eta && !status.startsWith('Downloading') && <p class="eta" aria-live="off">{eta.state === 'eta' ? (eta.sec === 0 ? 'Almost done.' : `Estimated time left: ${C.fmtDuration(eta.sec)}, around ${new Date(eta.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Based on the speed so far on this device, so it can change.`) : 'Estimating time left… (needs a few seconds of progress)'}</p>}
+        {busy && status.startsWith('Downloading') && <p class="eta">Model download is in progress. Time left for translation is shown after the download finishes, because it depends on this device.</p>}
       </section>
 
       {cues.length > 0 && <section>
