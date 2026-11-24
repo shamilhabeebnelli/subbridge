@@ -279,18 +279,33 @@ test('ETA: none before enough data, uses observed rate, handles resume and finis
   assert.equal(C.fmtDuration(4500), 'about 1 h 15 min');
 });
 
-test('offline mode sends no control tokens; leak check flags garbled output', async () => {
+test('offline mode: no tokens sent, tags kept around translated spans, formatted multi-line cue', async () => {
   const cue = { lines: ['<i>I have to meet the doctor,</i>', 'then we can talk.'] };
-  assert.ok(!/§/.test(C.cueSegments(cue, true)[0].text));
-  assert.ok(/§1§/.test(C.cueSegments(cue)[0].text));
-  assert.equal(C.cueSegments({ lines: ['a <b>big</b> day'] }, true)[0].text.includes('§'), false);
-  assert.equal(C.leaked('hello there', 'GEST1 नमस्ते 20022'), true);
-  assert.equal(C.leaked('hello there', 'x § y'), true);
-  assert.equal(C.leaked('Room 4B', 'कमरा 4B'), false);
-  assert.equal(C.leaked('hello', 'नमस्ते §1§'), false);
+  const seg = C.cueSegments(cue, true)[0];
+  assert.ok(!/§/.test(seg.text));
+  assert.ok(/§1§/.test(C.cueSegments(cue)[0].text)); // token engines unchanged
   const seen = [];
-  const r = await C.run({ cues: [cue, { lines: ['Hi'] }], provider: 'local', src: 'en', tgt: 'hi', gapMs: 0,
-    translate: async (t) => { seen.push(t); return t === 'Hi' ? 'GEST1 नमस्ते 20022' : 'ठीक'; } });
-  assert.ok(seen.every((t) => !t.includes('§')));
-  assert.equal(r.failed.length, 1); assert.equal(r.out.size, 1);
+  const tr = async (t) => { seen.push(t); return '[' + t + ']'; };
+  const r = await C.run({ cues: [cue, { lines: ['a <b>big</b> day, <font color="#f00">red</font>'] }, { lines: ['- <i>Yes.</i>', '- No.'] }], provider: 'local', src: 'en', tgt: 'hi', gapMs: 0, translate: tr });
+  assert.ok(seen.every((t) => !t.includes('§') && !/[<>]/.test(t)), JSON.stringify(seen));
+  assert.equal(r.failed.length, 0);
+  assert.equal(r.out.get('0:0').text, '<i>[I have to meet the doctor,]</i> [then we can talk.]');
+  assert.equal(r.out.get('1:0').text, '[a] <b>[big]</b> [day,] <font color="#f00">[red]</font>');
+  assert.equal(r.out.get('2:0').text, '- <i>[Yes.]</i>');
+  assert.equal(r.out.get('2:1').text, '- [No.]');
+  assert.equal(r.out.get('0:0').simplified, false);
+});
+
+test('leak guard: only known sentinel artifacts; legit codes pass; failed lines are not exported as translated', async () => {
+  assert.equal(C.leaked('hello there', 'GEST1 नमस्ते'), true);
+  assert.equal(C.leaked('hello there', 'x § y'), true);
+  assert.equal(C.leaked('Room 4B and iPhone15 and 3rd, MP3, B2B', 'कमरा 4B iPhone15 3rd MP3 B2B 20022'), false);
+  assert.equal(C.leaked('GEST1 is a code', 'GEST1 एक कोड'), false);
+  assert.equal(C.leaked('hello', 'नमस्ते §1§'), false);
+  const cues = [{ lines: ['Hi'] }, { lines: ['Room 4B'] }];
+  const r = await C.run({ cues, provider: 'local', src: 'en', tgt: 'hi', gapMs: 0, translate: async (t) => (t === 'Hi' ? 'GEST1 नमस्ते' : 'कमरा 4B') });
+  assert.equal(r.failed.length, 1); assert.equal(r.failed[0].ci, 0); assert.equal(r.out.size, 1);
+  const c0 = C.cueTranslation(cues[0], r.out, 0);
+  assert.equal(c0.translated, false); assert.deepEqual(c0.lines, ['Hi']); // original kept, flagged not translated
+  assert.equal(C.cueTranslation(cues[1], r.out, 1).translated, true);
 });
