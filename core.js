@@ -419,3 +419,20 @@ then we can talk.
 00:00:09,000 --> 00:00:11,000
 ♪ ♪
 `;
+// Estimated time left from observed progress in the current run only.
+// base = first progress sample of this run {t, done}; cur = latest {t, done, total}.
+// Returns null until there is enough data (at least 8 s of observed translation and some progress).
+export function etaSeconds(base, cur) {
+  if (!base || !cur) return null;
+  const dt = (cur.t - base.t) / 1000, dd = cur.done - base.done;
+  if (dt < 8 || dd <= 0) return null;
+  const left = cur.total - cur.done;
+  if (left <= 0) return 0;
+  return Math.ceil(left / (dd / dt));
+}
+export function fmtDuration(s) {
+  if (s < 45) return 'under a minute';
+  if (s < 3600) return `about ${Math.max(1, Math.round(s / 60))} min`;
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return `about ${h} h ${m} min`;
+}
