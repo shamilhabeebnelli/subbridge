@@ -79,13 +79,13 @@ export function parseSrt(input) {
 const TAG = /<\/?[a-zA-Z][^<>]*>|\{\\[^{}]*\}/g;
 
 // Leading and trailing tag runs stay outside the text sent out. Inner tags become numbered tokens.
-export function protect(line) {
+export function protect(line, noTok = false) {
   const lead = (/^(?:\s*(?:<\/?[a-zA-Z][^<>]*>|\{\\[^{}]*\}))+/.exec(line) || [''])[0];
   const rest = line.slice(lead.length);
   const trail = (/(?:(?:<\/?[a-zA-Z][^<>]*>|\{\\[^{}]*\})\s*)+$/.exec(rest) || [''])[0];
   const body = rest.slice(0, rest.length - trail.length);
   const inner = [];
-  const text = body.replace(TAG, (t) => { inner.push(t); return `§${inner.length}§`; });
+  const text = body.replace(TAG, (t) => { if (noTok) return ' '; inner.push(t); return `§${inner.length}§`; });
   return { lead, trail, inner, text };
 }
 
@@ -102,7 +102,8 @@ export function restore(p, translated) {
 
 // ---------- segmenting ----------
 // A cue becomes segments: one per line when it is a dash dialogue, else one joined segment.
-export function cueSegments(cue) {
+// noTok: the offline model garbles number tokens (seen live), so inner tags are dropped before translation instead.
+export function cueSegments(cue, noTok = false) {
   const lines = cue.lines.map((l) => l.trim()).filter((l) => l !== '');
   const dialogue = lines.length > 1 && lines.every((l) => /^[-–—]\s*/.test(l));
   const groups = dialogue ? lines.map((l) => [l]) : lines.length ? [lines] : [];
@@ -110,12 +111,12 @@ export function cueSegments(cue) {
     if (g.length === 1) {
       // Dialogue dash is held back so engines cannot drop it; it is put back after translation.
       const d = dialogue ? /^[-–—]\s*/.exec(g[0])[0] : '';
-      const p = protect(g[0].slice(d.length));
+      const p = protect(g[0].slice(d.length), noTok);
       return { single: p, dash: d ? d.trim() + ' ' : '', tags: [], text: p.text.replace(/\s+/g, ' ').trim(), lineCount: 1 };
     }
     // Several lines joined: every tag becomes a numbered token so tags that end one line and start the next survive.
     const tags = [];
-    const joined = g.join(' ').replace(TAG, (t) => { tags.push(t); return `§${tags.length}§`; });
+    const joined = g.join(' ').replace(TAG, (t) => { if (noTok) return ' '; tags.push(t); return `§${tags.length}§`; });
     return { single: null, tags, text: joined.replace(/\s+/g, ' ').trim(), lineCount: g.length };
   });
 }
@@ -185,7 +186,7 @@ export function plan(cues, provider) {
   const max = PROVIDERS[provider].maxChars;
   const jobs = [];
   let chars = 0;
-  cues.forEach((cue, ci) => cueSegments(cue).forEach((seg, si) => {
+  cues.forEach((cue, ci) => cueSegments(cue, provider === 'local').forEach((seg, si) => {
     if (!/[\p{L}\p{N}]/u.test(seg.text)) return; // pure symbols or music notes: leave alone
     const parts = splitLong(seg.text, max);
     jobs.push({ ci, si, parts });
@@ -253,6 +254,13 @@ export async function libreLanguages(url, fetchFn) {
 // ---------- runner ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Deterministic leak check: engine output holding a glued letters+digits fragment, or a stray section sign, that the source never had.
+export function leaked(source, translated) {
+  const frag = /[A-Z]{2,}\d+|\d+[A-Z]{2,}|§/g;
+  const bad = (translated.replace(/§\s*\d+\s*§/g, '').match(frag) || []);
+  return bad.some((b) => !source.includes(b));
+}
+
 // Translate planned jobs one request at a time. Stops on quota or config errors and returns what finished.
 export async function run({ cues, provider, src, tgt, translate, onProgress = () => {}, signal, wait = sleep, retries = 2, gapMs = 250, have }) {
   const { jobs, chars } = plan(cues, provider);
@@ -261,7 +269,7 @@ export async function run({ cues, provider, src, tgt, translate, onProgress = ()
   const failed = [];
   let done = 0;
   let stopped = null;
-  const segFor = (j) => cueSegments(cues[j.ci])[j.si];
+  const segFor = (j) => cueSegments(cues[j.ci], provider === 'local')[j.si];
   for (const job of jobs) {
     if (signal?.aborted) { stopped = 'stopped'; break; }
     const seg = segFor(job);
@@ -289,6 +297,7 @@ export async function run({ cues, provider, src, tgt, translate, onProgress = ()
       continue;
     }
     const joined = pieces.join(' ').trim();
+    if (leaked(seg.text, joined)) { failed.push({ ci: job.ci, si: job.si, error: 'garbled output (control token leaked), line left untranslated' }); continue; }
     const r = restoreSeg(seg, joined);
     out.set(`${job.ci}:${job.si}`, { text: r.text, simplified: r.simplified, lineCount: seg.lineCount });
     done += seg.text.length;
