@@ -1,0 +1,14 @@
+{
+  "name": "subbridge",
+  "version": "0.1.0",
+  "description": "Local web SRT subtitle translator beta with a reviewable translation grid",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test.mjs",
+    "test:browser": "node browser-test.mjs"
+  },
+  "license": "MIT",
+  "type": "module",
+  "dependencies": { "preact": "^10.26.0" },
+  "devDependencies": { "@playwright/test": "^1.65.1", "esbuild": "^0.28.2" }
+}
