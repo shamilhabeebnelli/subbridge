@@ -31,6 +31,8 @@ function App() {
   const [progress, setProgress] = useState(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [eta, setEta] = useState(null);
+  const etaBase = useRef(null);
   const [fileKey, setFileKey] = useState(0);
   const ac = useRef(null);
 
@@ -67,14 +69,14 @@ function App() {
     try { setLibreCodes(await C.libreLanguages(libreUrl, (u) => fetch(u))); setError(''); } catch (e) { setError('Could not read languages: ' + e.message); }
   }
   async function start() {
-    setError(''); setBusy(true); setStatus('Translating…');
+    setError(''); setBusy(true); setStatus('Translating…'); etaBase.current = null; setEta({ state: 'start' });
     ac.current = new AbortController();
     try {
       const translate = C.makeProvider(engine, { url: libreUrl }, (...a) => fetch(...a));
       const have = new Map(out);
       const r = await C.run({
         cues, provider: engine, src: source ? source[C.PROVIDERS[engine].key] : 'auto', tgt: target[C.PROVIDERS[engine].key],
-        translate, signal: ac.current.signal, have, onProgress: (p) => setProgress(p),
+        translate, signal: ac.current.signal, have, onProgress: (p) => { const now = Date.now(); if (!etaBase.current) etaBase.current = { t: now, done: p.done }; const sec = C.etaSeconds(etaBase.current, { t: now, done: p.done, total: p.total }); setEta(sec === null ? { state: 'estimating' } : { state: 'eta', sec, at: now + sec * 1000 }); setProgress(p); },
       });
       setOut(new Map(r.out));
       const left = cues.filter((c, i) => !C.cueTranslation(c, r.out, i).translated && C.cueSegments(c).length).length;
@@ -83,7 +85,7 @@ function App() {
       else if (r.stopped === 'stopped') setStatus(`Stopped. ${left}.`);
       else setStatus(r.failed.length ? `Finished with ${r.failed.length} failed lines. Run again to retry them.` : 'Finished. Review the lines below before using them.');
     } catch (e) { setStatus('Stopped: ' + e.message); }
-    setBusy(false);
+    setBusy(false); setEta(null);
   }
   const lines = (i) => manual[i] !== undefined ? manual[i].split('\n') : C.cueTranslation(cues[i], out, i).lines;
   const untranslated = cues.filter((c, i) => manual[i] === undefined && !C.cueTranslation(c, out, i).translated && C.cueSegments(c).length).length;
@@ -142,6 +144,7 @@ function App() {
         </div>
         {progress && <progress max={progress.total} value={progress.done} aria-label="Progress" />}
         {status && <p aria-live="polite" class="status">{status}</p>}
+        {busy && eta && <p class="eta">{eta.state === 'eta' ? (eta.sec === 0 ? 'Almost done.' : `Estimated time left: ${C.fmtDuration(eta.sec)}, around ${new Date(eta.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Based on the speed so far on this device, so it can change.`) : 'Estimating time left… (needs a few seconds of progress)'}</p>}
       </section>
 
       {cues.length > 0 && <section>
