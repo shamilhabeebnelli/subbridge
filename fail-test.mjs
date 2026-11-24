@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test';
 import http from 'node:http'; import { readFileSync } from 'node:fs';
 const mode = process.argv[2];
-const srv = http.createServer((q, r) => { const f = q.url.startsWith('/worker.js') ? 'worker.js' : 'index.html'; r.setHeader('content-type', f.endsWith('.js') ? 'text/javascript' : 'text/html'); r.end(readFileSync(f)); }).listen(8125);
+const srv = http.createServer((q, r) => { const f = /^\/[a-z0-9-]+\.js$/.test(q.url) ? q.url.slice(1) : 'index.html'; r.setHeader('content-type', f.endsWith('.js') ? 'text/javascript' : 'text/html'); r.end(readFileSync(f)); }).listen(8125);
 const ctx = await chromium.launchPersistentContext('/tmp/chrome-prof-fail' + mode, { ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}), headless: true, args: ['--no-sandbox'] });
 const page = ctx.pages()[0] || await ctx.newPage(); const errs = [];
 page.on('pageerror', (e) => errs.push(e.message)); 
