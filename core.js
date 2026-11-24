@@ -8,25 +8,26 @@ export const LIMITS = { bytes: 2 * 1024 * 1024, cues: 5000 };
 // mm 'yes' was probed live on 24 Nov 2026 (English to each). Everything else is a claim from docs, marked as such.
 export const LANGUAGES = [
   { name: 'Malayalam', native: 'മലയാളം', mm: 'ml', lt: 'ml' },
-  { name: 'English', native: 'English', mm: 'en', lt: 'en' },
-  { name: 'Hindi', native: 'हिन्दी', mm: 'hi', lt: 'hi' },
+  { name: 'English', native: 'English', mm: 'en', lt: 'en', loc: 'en' },
+  { name: 'Hindi', native: 'हिन्दी', mm: 'hi', lt: 'hi', loc: 'hi' },
   { name: 'Tamil', native: 'தமிழ்', mm: 'ta', lt: 'ta' },
   { name: 'Telugu', native: 'తెలుగు', mm: 'te', lt: 'te' },
   { name: 'Kannada', native: 'ಕನ್ನಡ', mm: 'kn', lt: 'kn' },
   { name: 'Tulu', native: 'ತುಳು', mm: null, lt: null },
-  { name: 'Arabic', native: 'العربية', mm: 'ar', lt: 'ar', rtl: true },
-  { name: 'French', native: 'Français', mm: 'fr', lt: 'fr' },
+  { name: 'Arabic', native: 'العربية', mm: 'ar', lt: 'ar', loc: 'ar', rtl: true },
+  { name: 'French', native: 'Français', mm: 'fr', lt: 'fr', loc: 'fr' },
   { name: 'Portuguese', native: 'Português', mm: 'pt', lt: 'pt' },
   { name: 'Malay', native: 'Bahasa Melayu', mm: 'ms', lt: 'ms' },
   { name: 'Urdu', native: 'اردو', mm: 'ur', lt: 'ur', rtl: true },
-  { name: 'Chinese (Simplified)', native: '简体中文', mm: 'zh-CN', lt: 'zh' },
-  { name: 'Spanish', native: 'Español', mm: 'es', lt: 'es' },
+  { name: 'Chinese (Simplified)', native: '简体中文', mm: 'zh-CN', lt: 'zh', loc: 'zh' },
+  { name: 'Spanish', native: 'Español', mm: 'es', lt: 'es', loc: 'es' },
   { name: 'Bengali', native: 'বাংলা', mm: 'bn', lt: 'bn' },
-  { name: 'Indonesian', native: 'Bahasa Indonesia', mm: 'id', lt: 'id' },
+  { name: 'Indonesian', native: 'Bahasa Indonesia', mm: 'id', lt: 'id', loc: 'id' },
 ].map((l) => ({ id: l.name.toLowerCase().replace(/\W+/g, '-'), ...l }));
 
 export const PROVIDERS = {
   mymemory: { label: 'MyMemory (free, no key, small daily limit)', maxChars: 480, host: 'api.mymemory.translated.net', key: 'mm', canAuto: true },
+  local: { label: 'Offline in your browser (beta, English to 6 languages)', maxChars: 400, host: 'huggingface.co', key: 'loc', canAuto: false },
   libre: { label: 'LibreTranslate (your own server, no key)', maxChars: 4000, host: '', key: 'lt', canAuto: true },
 };
 
@@ -215,6 +216,13 @@ export function makeProvider(id, opts, fetchFn) {
       if (status === 403 || status === 400) throw new ConfigError(String(d.responseDetails || 'MyMemory rejected the language pair.').slice(0, 160));
       if (status !== 200 || typeof out !== 'string') throw new Error(`MyMemory error ${status}`);
       return out;
+    };
+  }
+  if (id === 'local') {
+    return async (text, src, tgt, signal) => {
+      if (!opts.worker) throw new ConfigError('The offline engine needs the hosted page (it uses a background worker).');
+      if (src !== 'auto' && src !== 'en') throw new ConfigError('The offline engine translates English subtitles only.');
+      return opts.worker(text, tgt, signal);
     };
   }
   if (id === 'libre') {
@@ -419,6 +427,7 @@ then we can talk.
 00:00:09,000 --> 00:00:11,000
 ♪ ♪
 `;
+
 // Estimated time left from observed progress in the current run only.
 // base = first progress sample of this run {t, done}; cur = latest {t, done, total}.
 // Returns null until there is enough data (at least 8 s of observed translation and some progress).
