@@ -265,6 +265,7 @@ test('promos: sparse gaps shorten a line to 2s, then fall back to the end', () =
   const few = C.addPromos(mk(1000, 30), seeded(3));
   assert.equal(few.atEnd, 5);
 });
+
 test('ETA: none before enough data, uses observed rate, handles resume and finish', () => {
   assert.equal(C.etaSeconds(null, { t: 1, done: 1, total: 10 }), null);
   assert.equal(C.etaSeconds({ t: 0, done: 0 }, { t: 5000, done: 100, total: 1000 }), null); // under 8 s
@@ -276,4 +277,20 @@ test('ETA: none before enough data, uses observed rate, handles resume and finis
   assert.equal(C.fmtDuration(30), 'under a minute');
   assert.equal(C.fmtDuration(300), 'about 5 min');
   assert.equal(C.fmtDuration(4500), 'about 1 h 15 min');
+});
+
+test('offline mode sends no control tokens; leak check flags garbled output', async () => {
+  const cue = { lines: ['<i>I have to meet the doctor,</i>', 'then we can talk.'] };
+  assert.ok(!/§/.test(C.cueSegments(cue, true)[0].text));
+  assert.ok(/§1§/.test(C.cueSegments(cue)[0].text));
+  assert.equal(C.cueSegments({ lines: ['a <b>big</b> day'] }, true)[0].text.includes('§'), false);
+  assert.equal(C.leaked('hello there', 'GEST1 नमस्ते 20022'), true);
+  assert.equal(C.leaked('hello there', 'x § y'), true);
+  assert.equal(C.leaked('Room 4B', 'कमरा 4B'), false);
+  assert.equal(C.leaked('hello', 'नमस्ते §1§'), false);
+  const seen = [];
+  const r = await C.run({ cues: [cue, { lines: ['Hi'] }], provider: 'local', src: 'en', tgt: 'hi', gapMs: 0,
+    translate: async (t) => { seen.push(t); return t === 'Hi' ? 'GEST1 नमस्ते 20022' : 'ठीक'; } });
+  assert.ok(seen.every((t) => !t.includes('§')));
+  assert.equal(r.failed.length, 1); assert.equal(r.out.size, 1);
 });
