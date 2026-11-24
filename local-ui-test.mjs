@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import http from 'node:http'; import { readFileSync } from 'node:fs';
-const srv = http.createServer((q, r) => { const f = q.url.startsWith('/worker.js') ? 'worker.js' : 'index.html'; r.setHeader('content-type', f.endsWith('.js') ? 'text/javascript' : 'text/html'); r.end(readFileSync(f)); }).listen(8126);
+const srv = http.createServer((q, r) => { const f = /^\/[a-z0-9-]+\.js$/.test(q.url) ? q.url.slice(1) : 'index.html'; r.setHeader('content-type', f.endsWith('.js') ? 'text/javascript' : 'text/html'); r.end(readFileSync(f)); }).listen(8126);
 const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}), headless: true, args: ['--no-sandbox'] });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 const errors = []; page.on('pageerror', (e) => errors.push(e.message));
