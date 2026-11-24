@@ -1,0 +1,37 @@
+import { chromium } from '@playwright/test';
+import assert from 'node:assert/strict';
+import http from 'node:http'; import { readFileSync } from 'node:fs';
+const srv = http.createServer((q, r) => { const f = q.url.startsWith('/worker.js') ? 'worker.js' : 'index.html'; r.setHeader('content-type', f.endsWith('.js') ? 'text/javascript' : 'text/html'); r.end(readFileSync(f)); }).listen(8126);
+const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}), headless: true, args: ['--no-sandbox'] });
+const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const errors = []; page.on('pageerror', (e) => errors.push(e.message));
+const hosts = []; page.on('request', (r) => { if (/^https?:/.test(r.url())) hosts.push(new URL(r.url()).host); });
+await page.goto('http://localhost:8126/');
+await page.getByRole('button', { name: 'Try demo subtitles' }).click();
+await page.getByLabel('Engine').selectOption('local');
+const tr = page.getByRole('button', { name: 'Translate', exact: true });
+const sup = () => page.locator('.support').innerText();
+const ok = (c, m) => { assert.ok(c, m); console.log('PASS', m); };
+await page.getByLabel('From language').selectOption('english'); await page.getByRole('checkbox').check();
+for (const [id, name] of [['malayalam', 'Malayalam'], ['tamil', 'Tamil'], ['telugu', 'Telugu'], ['tulu', 'Tulu']]) {
+  await page.getByLabel('To language').selectOption(id);
+  ok(await tr.isDisabled() && /not (available offline|supported)|no engine/.test(await sup()), name + ' blocked in offline mode');
+}
+await page.getByLabel('To language').selectOption('malayalam');
+ok(/Offline mode only has Hindi, Arabic, French, Spanish, Chinese and Indonesian/.test(await sup()), 'blocked message names the six languages');
+await page.getByLabel('To language').selectOption('french');
+const t = await sup(); ok(/1\.5 GB/.test(t) && /phone/.test(t) && /Quality is not verified/.test(t) && /100 MB/.test(t), 'resource and quality warnings shown');
+ok(/downloaded from huggingface\.co/.test(await page.locator('label.check').innerText()), 'first-download consent text');
+await page.getByRole('checkbox').uncheck(); ok(await tr.isDisabled(), 'translate disabled without consent');
+await page.getByLabel('To language').selectOption('chinese-simplified-');
+ok(/repeats phrases/.test(await sup()), 'Chinese quality warning');
+await page.getByLabel('From language').selectOption('malayalam');
+ok(await tr.isDisabled(), 'non-English source blocked in offline mode');
+await page.getByLabel('From language').selectOption('english'); await page.getByLabel('To language').selectOption('french');
+await page.locator('.support').scrollIntoViewIfNeeded();
+await page.screenshot({ path: '/downloads/subbridge-offline-mobile.png' });
+ok(await page.evaluate(() => document.documentElement.scrollWidth) <= 391, 'no horizontal overflow at 390px');
+await page.getByLabel('Engine').selectOption('mymemory');
+ok(/accepted by MyMemory/.test(await sup()) && !hosts.some((h) => /huggingface|hf\.co/.test(h)), 'online engine unchanged and no model host contacted before consent');
+assert.equal(errors.length, 0, errors.join()); ok(true, 'no runtime errors');
+await browser.close(); srv.close();
