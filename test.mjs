@@ -265,3 +265,15 @@ test('promos: sparse gaps shorten a line to 2s, then fall back to the end', () =
   const few = C.addPromos(mk(1000, 30), seeded(3));
   assert.equal(few.atEnd, 5);
 });
+test('ETA: none before enough data, uses observed rate, handles resume and finish', () => {
+  assert.equal(C.etaSeconds(null, { t: 1, done: 1, total: 10 }), null);
+  assert.equal(C.etaSeconds({ t: 0, done: 0 }, { t: 5000, done: 100, total: 1000 }), null); // under 8 s
+  assert.equal(C.etaSeconds({ t: 0, done: 0 }, { t: 20000, done: 0, total: 1000 }), null); // no progress
+  assert.equal(C.etaSeconds({ t: 0, done: 0 }, { t: 10000, done: 100, total: 1000 }), 90); // 10 chars/s, 900 left
+  // resumed run: baseline starts at already-finished chars, not zero
+  assert.equal(C.etaSeconds({ t: 0, done: 500 }, { t: 10000, done: 600, total: 1000 }), 40);
+  assert.equal(C.etaSeconds({ t: 0, done: 0 }, { t: 10000, done: 1000, total: 1000 }), 0);
+  assert.equal(C.fmtDuration(30), 'under a minute');
+  assert.equal(C.fmtDuration(300), 'about 5 min');
+  assert.equal(C.fmtDuration(4500), 'about 1 h 15 min');
+});
