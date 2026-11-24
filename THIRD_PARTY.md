@@ -21,3 +21,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+# Offline engine (worker.js)
+
+Bundled with esbuild into 4-worker.js: @huggingface/transformers 4.3.2 (Apache License 2.0, https://github.com/huggingface/transformers.js/blob/main/LICENSE) and its dependencies, including ONNX Runtime Web (MIT). The runtime WebAssembly file is loaded from cdn.jsdelivr.net when the offline engine is used. Model files are not bundled. They are downloaded from huggingface.co on first use: Xenova/opus-mt-en-hi, -ar, -fr, -es, -zh, -id (ONNX conversions of Helsinki-NLP Opus-MT models, listed as apache-2.0 on their Hugging Face model cards).
