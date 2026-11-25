@@ -7,7 +7,7 @@ export const LIMITS = { bytes: 2 * 1024 * 1024, cues: 5000 };
 // mm = MyMemory code, lt = LibreTranslate code.
 // mm 'yes' was probed live on 24 Nov 2026 (English to each). Everything else is a claim from docs, marked as such.
 export const LANGUAGES = [
-  { name: 'Malayalam', native: 'മലയാളം', mm: 'ml', lt: 'ml' },
+  { name: 'Malayalam', native: 'മലയാളം', mm: 'ml', lt: 'ml', loc: 'ml' },
   { name: 'English', native: 'English', mm: 'en', lt: 'en', loc: 'en' },
   { name: 'Hindi', native: 'हिन्दी', mm: 'hi', lt: 'hi', loc: 'hi' },
   { name: 'Tamil', native: 'தமிழ்', mm: 'ta', lt: 'ta' },
@@ -27,7 +27,7 @@ export const LANGUAGES = [
 
 export const PROVIDERS = {
   mymemory: { label: 'MyMemory (free, no key, small daily limit)', maxChars: 480, host: 'api.mymemory.translated.net', key: 'mm', canAuto: true },
-  local: { label: 'Offline in your browser (beta, English to 6 languages)', maxChars: 400, host: 'huggingface.co', key: 'loc', canAuto: false },
+  local: { label: 'Offline in your browser (beta, English to 7 languages)', maxChars: 400, host: 'huggingface.co', key: 'loc', canAuto: false },
   libre: { label: 'LibreTranslate (your own server, no key)', maxChars: 4000, host: '', key: 'lt', canAuto: true },
 };
 
@@ -85,8 +85,13 @@ export function protect(line, noTok = false) {
   const trail = (/(?:(?:<\/?[a-zA-Z][^<>]*>|\{\\[^{}]*\})\s*)+$/.exec(rest) || [''])[0];
   const body = rest.slice(0, rest.length - trail.length);
   const inner = [];
-  const text = noTok ? body : body.replace(TAG, (t) => { inner.push(t); return `§${inner.length}§`; });
-  return { lead, trail, inner, text };
+  let dropped = 0;
+  const text = noTok ? body.replace(TAG, () => { dropped++; return ''; }) : body.replace(TAG, (t) => { inner.push(t); return `§${inner.length}§`; });
+  if (noTok && dropped > 0) { // a sentence with tags inside: keep none, so no tag is left unbalanced
+    dropped += ((lead + trail).match(TAG) || []).length;
+    return { lead: '', trail: '', inner, text, dropped };
+  }
+  return { lead, trail, inner, text, dropped };
 }
 
 export function restore(p, translated) {
@@ -102,9 +107,8 @@ export function restore(p, translated) {
 
 // ---------- segmenting ----------
 // A cue becomes segments: one per line when it is a dash dialogue, else one joined segment.
-// noTok (offline engine): the model garbles § tokens (seen live), so no tokens are sent. Text between tags is translated as separate spans and the original tags are put back around them.
-const HAS_TAG = /<\/?[a-zA-Z][^<>]*>|\{\\[^{}]*\}/;
-const splitSpans = (str) => { const out = []; let last = 0; for (const m of str.matchAll(TAG)) { out.push({ v: str.slice(last, m.index) }); out.push({ tag: m[0] }); last = m.index + m[0].length; } out.push({ v: str.slice(last) }); return out; };
+// noTok (offline engine): the model garbles § tokens (seen live) and translating the text between tags as separate spans broke meaning (negation lost), so neither is used.
+// Tags around the whole line are kept; tags inside a sentence are dropped and the cue is flagged "some tags were dropped".
 export function cueSegments(cue, noTok = false) {
   const lines = cue.lines.map((l) => l.trim()).filter((l) => l !== '');
   const dialogue = lines.length > 1 && lines.every((l) => /^[-–—]\s*/.test(l));
@@ -114,15 +118,13 @@ export function cueSegments(cue, noTok = false) {
       // Dialogue dash is held back so engines cannot drop it; it is put back after translation.
       const d = dialogue ? /^[-–—]\s*/.exec(g[0])[0] : '';
       const p = protect(g[0].slice(d.length), noTok);
-      const spans = noTok && HAS_TAG.test(p.text) ? splitSpans(p.text) : null;
-      return { single: p, dash: d ? d.trim() + ' ' : '', tags: [], spans, text: (spans ? spans.filter((x) => !x.tag).map((x) => x.v).join(' ') : p.text).replace(/\s+/g, ' ').trim(), lineCount: 1 };
+      return { single: p, dash: d ? d.trim() + ' ' : '', tags: [], text: p.text.replace(/\s+/g, ' ').trim(), lineCount: 1 };
     }
     // Several lines joined: every tag becomes a numbered token so tags that end one line and start the next survive.
     const tags = [];
     if (noTok) {
-      const raw = g.join(' ');
-      const spans = HAS_TAG.test(raw) ? splitSpans(raw) : null;
-      return { single: null, tags: [], spans, text: (spans ? spans.filter((x) => !x.tag).map((x) => x.v).join(' ') : raw).replace(/\s+/g, ' ').trim(), lineCount: g.length };
+      const p = protect(g.join(' '), true);
+      return { single: null, noTok: true, lead: p.lead, trail: p.trail, dropped: p.dropped, tags: [], text: p.text.replace(/\s+/g, ' ').trim(), lineCount: g.length };
     }
     const joined = g.join(' ').replace(TAG, (t) => { tags.push(t); return `§${tags.length}§`; });
     return { single: null, tags, text: joined.replace(/\s+/g, ' ').trim(), lineCount: g.length };
@@ -130,7 +132,8 @@ export function cueSegments(cue, noTok = false) {
 }
 
 export function restoreSeg(seg, translated) {
-  if (seg.single) { const r = restore(seg.single, translated.replace(/^[-–—]\s*/, '')); return { ...r, text: (seg.dash || '') + r.text }; }
+  if (seg.single) { const r = restore(seg.single, translated.replace(/^[-–—]\s*/, '')); return { text: (seg.dash || '') + r.text, simplified: r.simplified || seg.single.dropped > 0 }; }
+  if (seg.noTok) return { text: seg.lead + translated.replace(/\s+/g, ' ').trim() + seg.trail, simplified: seg.dropped > 0 };
   let out = translated;
   let missing = false;
   for (const [i] of seg.tags.entries()) {
@@ -196,14 +199,6 @@ export function plan(cues, provider) {
   let chars = 0;
   cues.forEach((cue, ci) => cueSegments(cue, provider === 'local').forEach((seg, si) => {
     if (!/[\p{L}\p{N}]/u.test(seg.text)) return; // pure symbols or music notes: leave alone
-    if (seg.spans) {
-      const texts = seg.spans.filter((x) => !x.tag);
-      const parts = []; const counts = [];
-      for (const x of texts) { const ps = /[\p{L}\p{N}]/u.test(x.v) ? splitLong(x.v.trim().replace(/\s+/g, ' '), max) : []; counts.push(ps.length); parts.push(...ps); }
-      jobs.push({ ci, si, parts, counts });
-      chars += seg.text.length;
-      return;
-    }
     const parts = splitLong(seg.text, max);
     jobs.push({ ci, si, parts });
     chars += seg.text.length;
@@ -311,16 +306,7 @@ export async function run({ cues, provider, src, tgt, translate, onProgress = ()
       failed.push({ ci: job.ci, si: job.si, error: String(e.message || e).slice(0, 120) });
       continue;
     }
-    let joined = pieces.join(' ').trim();
-    if (seg.spans) { // put the original tags and spacing back around each translated span
-      let k = 0, n = 0;
-      joined = seg.spans.map((x) => {
-        if (x.tag) return x.tag;
-        const c = job.counts[n++]; if (!c) return x.v;
-        const t = pieces.slice(k, k + c).join(' '); k += c;
-        return (/^\s/.test(x.v) ? ' ' : '') + t + (/\s$/.test(x.v) ? ' ' : '');
-      }).join('');
-    }
+    const joined = pieces.join(' ').trim();
     if (leaked(seg.text, joined)) { failed.push({ ci: job.ci, si: job.si, error: 'garbled output (control token leaked), line left untranslated' }); continue; }
     const r = restoreSeg(seg, joined);
     out.set(`${job.ci}:${job.si}`, { text: r.text, simplified: r.simplified, lineCount: seg.lineCount });
