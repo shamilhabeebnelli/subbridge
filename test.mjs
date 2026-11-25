@@ -279,21 +279,23 @@ test('ETA: none before enough data, uses observed rate, handles resume and finis
   assert.equal(C.fmtDuration(4500), 'about 1 h 15 min');
 });
 
-test('offline mode: no tokens sent, tags kept around translated spans, formatted multi-line cue', async () => {
+test('offline mode: no tokens, whole-sentence translation, outer tags kept, inner tags dropped and flagged', async () => {
   const cue = { lines: ['<i>I have to meet the doctor,</i>', 'then we can talk.'] };
-  const seg = C.cueSegments(cue, true)[0];
-  assert.ok(!/§/.test(seg.text));
+  assert.ok(!/§/.test(C.cueSegments(cue, true)[0].text));
   assert.ok(/§1§/.test(C.cueSegments(cue)[0].text)); // token engines unchanged
   const seen = [];
   const tr = async (t) => { seen.push(t); return '[' + t + ']'; };
-  const r = await C.run({ cues: [cue, { lines: ['a <b>big</b> day, <font color="#f00">red</font>'] }, { lines: ['- <i>Yes.</i>', '- No.'] }], provider: 'local', src: 'en', tgt: 'hi', gapMs: 0, translate: tr });
+  const cues = [cue, { lines: ['She <i>never</i> told me the truth.'] }, { lines: ['<i>Whole line italic.</i>'] }, { lines: ['- <i>Yes.</i>', '- No.'] }, { lines: ['<i>Hi</i> there'] }];
+  const r = await C.run({ cues, provider: 'local', src: 'en', tgt: 'hi', gapMs: 0, translate: tr });
   assert.ok(seen.every((t) => !t.includes('§') && !/[<>]/.test(t)), JSON.stringify(seen));
+  assert.ok(seen.includes('She never told me the truth.')); // sentence stays whole (negation kept)
   assert.equal(r.failed.length, 0);
-  assert.equal(r.out.get('0:0').text, '<i>[I have to meet the doctor,]</i> [then we can talk.]');
-  assert.equal(r.out.get('1:0').text, '[a] <b>[big]</b> [day,] <font color="#f00">[red]</font>');
-  assert.equal(r.out.get('2:0').text, '- <i>[Yes.]</i>');
-  assert.equal(r.out.get('2:1').text, '- [No.]');
-  assert.equal(r.out.get('0:0').simplified, false);
+  assert.equal(r.out.get('0:0').text, '[I have to meet the doctor, then we can talk.]'); assert.equal(r.out.get('0:0').simplified, true);
+  assert.equal(r.out.get('1:0').simplified, true);
+  assert.equal(r.out.get('2:0').text, '<i>[Whole line italic.]</i>'); assert.equal(r.out.get('2:0').simplified, false);
+  assert.equal(r.out.get('3:0').text, '- <i>[Yes.]</i>'); assert.equal(r.out.get('3:0').simplified, false);
+  assert.equal(r.out.get('3:1').text, '- [No.]'); assert.equal(r.out.get('3:1').simplified, false);
+  assert.equal(r.out.get('4:0').text, '[Hi there]'); assert.equal(r.out.get('4:0').simplified, true);
 });
 
 test('leak guard: only known sentinel artifacts; legit codes pass; failed lines are not exported as translated', async () => {
@@ -308,4 +310,28 @@ test('leak guard: only known sentinel artifacts; legit codes pass; failed lines 
   const c0 = C.cueTranslation(cues[0], r.out, 0);
   assert.equal(c0.translated, false); assert.deepEqual(c0.lines, ['Hi']); // original kept, flagged not translated
   assert.equal(C.cueTranslation(cues[1], r.out, 1).translated, true);
+});
+
+test('offline tag cases: tags-only cue, line breaks, dash dialogue, nested', async () => {
+  const seen = [];
+  const tr = async (t) => { seen.push(t); return '[' + t + ']'; };
+  const cues = [
+    { lines: ['<i></i>'] },                                   // tags only: nothing to translate
+    { lines: ['<i>First line</i>', '<i>second line</i>'] },    // each line wrapped: inner tags (between lines) dropped, flagged
+    { lines: ['<i>One sentence', 'over two lines.</i>'] },     // wrapped as a whole across a break: kept
+    { lines: ['- <i>Hi</i> there', '- Bye.'] },                // dash dialogue, inner tag in one line
+    { lines: ['{\\an8}Top text'] },                             // ASS positioning tag at the front: kept
+    { lines: ['She said <i>no</i>, not <b>yes</b>.'] },
+  ];
+  const r = await C.run({ cues, provider: 'local', src: 'en', tgt: 'ml', gapMs: 0, translate: tr });
+  assert.ok(seen.every((t) => !/[<>{}§]/.test(t)), JSON.stringify(seen));
+  assert.ok(!r.out.has('0:0'));
+  assert.equal(r.out.get('1:0').text, '[First line second line]'); assert.equal(r.out.get('1:0').simplified, true);
+  assert.equal(r.out.get('2:0').text, '<i>[One sentence over two lines.]</i>'); assert.equal(r.out.get('2:0').simplified, false);
+  assert.equal(r.out.get('3:0').text, '- [Hi there]'); assert.equal(r.out.get('3:0').simplified, true);
+  assert.equal(r.out.get('3:1').text, '- [Bye.]'); assert.equal(r.out.get('3:1').simplified, false);
+  assert.equal(r.out.get('4:0').text, '{\\an8}[Top text]'); assert.equal(r.out.get('4:0').simplified, false);
+  assert.equal(r.out.get('5:0').text, '[She said no, not yes.]'); assert.equal(r.out.get('5:0').simplified, true);
+  assert.ok(seen.includes('She said no, not yes.'));
+  const t = C.cueTranslation(cues[5], r.out, 5); assert.equal(t.simplified, true);
 });
