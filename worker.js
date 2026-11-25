@@ -1,2 +1,2 @@
-// Loader. The engine bundle is 4-worker.js (the 4- is an accident of how it was uploaded to GitHub).
-import './4-worker.js';
+// Loader. The engine bundle is 1-engine.js (the 1- is added by the GitHub upload tool).
+import './1-engine.js';
