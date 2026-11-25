@@ -50,7 +50,7 @@ npm test
 CHROME_PATH=/path/to/chrome npm run test:browser
 ```
 
-The offline engine is bundled by `build.mjs` into `4-worker.js`, which the small `worker.js` loads (the 4- prefix is an accident of how the file was uploaded; it is the same file build.mjs writes). Run `npm ci` first. Serve the folder over http (not file://) so the worker can start. Speed test used for the numbers above: `node local-test.mjs <language-id> <cues>`.
+The offline engine is bundled by `build.mjs` into `1-engine.js`, which the small `worker.js` loads (the 1- prefix is added by GitHub's upload tool; it is the same file build.mjs writes). Run `npm ci` first. Serve the folder over http (not file://) so the worker can start. Speed test used for the numbers above: `node local-test.mjs <language-id> <cues>`.
 
 ```
 ```
