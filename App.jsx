@@ -108,6 +108,8 @@ function App() {
   const lines = (i) => manual[i] !== undefined ? manual[i].split('\n') : C.cueTranslation(cues[i], out, i).lines;
   const untranslated = cues.filter((c, i) => manual[i] === undefined && !C.cueTranslation(c, out, i).translated && C.cueSegments(c).length).length;
   const anyDone = out.size > 0 || Object.keys(manual).length > 0;
+  const lostTags = anyDone ? cues.filter((c, i) => manual[i] === undefined && C.cueTranslation(c, out, i).simplified).length : 0;
+  const saveSrt = (name, mode) => { if (lostTags > 0 && !window.confirm(`${lostTags} ${lostTags === 1 ? 'cue lost' : 'cues lost'} formatting tags that were inside a sentence (italics, colours). The text is kept, the tags are not. Download anyway?`)) return; download(name, C.buildSrt(cues, allLines(), mode, { promos: true, rng: secureRng })); };
   const allLines = () => cues.map((_, i) => lines(i));
   const code = target[C.PROVIDERS[engine].key] || target.id;
 
@@ -145,9 +147,10 @@ function App() {
           {sup === 'yes' && engine === 'local' && `${target.name}: translated on this device with a small Opus-MT model. English subtitles only. First use downloads the model (about 100 MB, cached afterwards). No daily service limit from a service. Uses about 1.5 GB of memory on a desktop browser and can be slow or fail on a phone with little memory. Quality is not verified${target.id === 'chinese-simplified-' ? ' (Chinese sometimes repeats phrases, check every line)' : ''}.`}
           {sup === 'yes' && engine !== 'local' && (engine === 'mymemory' ? `${target.name}: accepted by MyMemory. ${PROBED}` : `${target.name}: available on this server.`)}
           {sup === 'unknown' && `${target.name}: support is not known for this engine. Try a short test.`}
-          {sup === 'no' && (target.id === 'tulu' ? 'Tulu: no engine here supports it. Pick another language.' : engine === 'local' ? `${target.name}: not available offline. Offline mode only has Hindi, Arabic, French, Spanish, Chinese and Indonesian. Pick one of those, or use another engine.` : `${target.name}: not available on this engine.`)}
+          {sup === 'no' && (target.id === 'tulu' ? 'Tulu: no engine here supports it. Pick another language.' : engine === 'local' ? `${target.name}: not available offline. Offline mode only has Hindi, Malayalam, Arabic, French, Spanish, Chinese and Indonesian. Pick one of those, or use another engine.` : `${target.name}: not available on this engine.`)}
           {supSrc === 'no' && ` Source language ${source.name} is not available on this engine.`}
         </p>
+        {engine === 'local' && target.id === 'malayalam' && sup === 'yes' && <p class="warn" role="alert"><b>Experimental Malayalam.</b> This Malayalam model is a community conversion of a small Helsinki OPUS-MT model. In tests it sometimes changed or lost the meaning of negatives ("never", "don't"), garbled names, dropped words or invented text. Review every line before using it.</p>}
         <details><summary>Add a language code</summary>
           <div class="row"><input aria-label="Language name" placeholder="Name, e.g. German" value={custom.name} onInput={(e) => setCustom({ ...custom, name: e.target.value })} /><input aria-label="Language code" placeholder="Code, e.g. de" value={custom.code} onInput={(e) => setCustom({ ...custom, code: e.target.value })} /><button onClick={addCustom}>Add</button></div>
         </details>
@@ -169,10 +172,11 @@ function App() {
 
       {cues.length > 0 && <section>
         <h2>4. Review and download</h2>
+        {lostTags > 0 && <p class="warn" role="status">{lostTags} {lostTags === 1 ? 'cue lost' : 'cues lost'} formatting tags that were inside a sentence (marked "some tags were dropped" below). Whole sentences are translated so the meaning stays together, so inline italics or colours cannot be kept there. Tags around a whole line are kept. You will be asked to confirm before downloading.</p>}
         {anyDone && untranslated > 0 && <p class="warn">{untranslated} {untranslated === 1 ? 'cue is' : 'cues are'} not translated and will keep the original text.</p>}
         <div class="row">
-          <button class="primary" disabled={!anyDone} onClick={() => download(`translated.${code}.srt`, C.buildSrt(cues, allLines(), 'translated', { promos: true, rng: secureRng }))}>Download translated SRT</button>
-          <button disabled={!anyDone} onClick={() => download(`bilingual.${code}.srt`, C.buildSrt(cues, allLines(), 'bilingual', { promos: true, rng: secureRng }))}>Download bilingual SRT</button>
+          <button class="primary" disabled={!anyDone} onClick={() => saveSrt(`translated.${code}.srt`, 'translated')}>Download translated SRT</button>
+          <button disabled={!anyDone} onClick={() => saveSrt(`bilingual.${code}.srt`, 'bilingual')}>Download bilingual SRT</button>
         </div>
         <div class="cues">
           {cues.map((c, i) => {
