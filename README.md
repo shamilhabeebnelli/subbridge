@@ -4,7 +4,7 @@
 
 A web page for translating SRT subtitle files with a reviewable grid. One HTML file, no account, MIT, free. Live at https://subtranslator.denelli.in
 
-Status: limited beta. It is not a finished all-language, whole-film translator. The online engine (MyMemory) allows about 5000 characters a day and quality varies. The offline engine has no daily service limit but covers only six languages. Malayalam, Tamil, Telugu, Kannada, Bengali, Urdu, Portuguese and Malay work only through the capped online engine, and Tulu has no engine. See Limits.
+Status: limited beta. It is not a finished all-language, whole-film translator. The online engine (MyMemory) allows about 5000 characters a day and quality varies. The offline engine has no daily service limit but covers six languages plus an EXPERIMENTAL Malayalam option. Tamil, Telugu, Kannada, Bengali, Urdu, Portuguese and Malay work only through the capped online engine, and Tulu has no engine. See Limits.
 
 Other subtitle tools exist and are more complete for many jobs, for example Subtitle Edit, Aegisub and several online SRT translators. SubBridge is a small free option with a review grid and no sign-up. No claim of being first or best.
 
@@ -13,7 +13,7 @@ Other subtitle tools exist and are more complete for many jobs, for example Subt
 - Opens a UTF-8 SRT. Keeps cue numbers and timing lines exactly. Handles BOM, CRLF, missing numbers, skips unreadable blocks.
 - Protects italic/bold/ASS-position tags, keeps dialogue dashes, rebalances two-line cues, leaves music-note-only cues alone.
 - Engines: MyMemory (free, no key, online, about 5000 characters a day), a LibreTranslate server you run yourself (no key), and an offline in-browser engine (beta). No API keys are collected anywhere.
-- Offline engine (beta): English subtitles to Hindi, Arabic, French, Spanish, Chinese (Simplified) and Indonesian, translated on your device with small Opus-MT models (Apache-2.0 per their Hugging Face model cards) through transformers.js. No daily service limit. First use downloads about 100 to 115 MB per language from huggingface.co plus the runtime from cdn.jsdelivr.net, then the browser caches it. Subtitle text never leaves the page in this mode.
+- Offline engine (beta): English subtitles to Hindi, Arabic, French, Spanish, Chinese (Simplified) and Indonesian (and, experimental, Malayalam, see Limits), translated on your device with small Opus-MT models (Apache-2.0 per their Hugging Face model cards) through transformers.js. No daily service limit. First use downloads about 100 to 115 MB per language from huggingface.co plus the runtime from cdn.jsdelivr.net, then the browser caches it. Subtitle text never leaves the page in this mode.
 - Shows an estimated time left from the speed observed in the current run, separately from the model download. It is an estimate and changes with the device.
 - Shows how many characters will be sent and where, and requires a tick before anything leaves the page.
 - Stops cleanly on the free daily limit, keeps finished cues, lets you continue later while the page stays open.
@@ -35,7 +35,11 @@ Measured on one machine only (headless Chrome, 2 CPUs, 2 GB RAM, desktop-class),
 
 Not verified: real phones (a phone with little memory may be slow or fail), films longer than 400 cues, and quality by native speakers. Chinese sometimes repeats phrases. Gender and register are guessed. Check every line.
 
-Not covered offline: Malayalam, Tamil, Telugu, Kannada, Bengali, Urdu, Portuguese, Malay and Tulu. A larger multilingual model (M2M100, MIT) was tried for Malayalam and crashed the browser tab on the 2 GB test machine, so it is not shipped. Telugu and Tulu are not in that model's language list.
+Experimental Malayalam offline: uses a community int8 ONNX conversion (akm9191/opus-mt-en-ml-int8-onnx, pinned to commit f46c4b34a8b83c8e825de869de16e30fd1029a32, Apache-2.0, file hashes match its card) of Helsinki-NLP/opus-mt-en-ml (model card BLEU 19.1 on Tatoeba). In a 20-line natural dialogue test and 30 further sentences, about 4 of 50 had defects, 2 of them changed meaning (a negative turned into an instruction, a dropped word), and one line ended in invented words. Names can be garbled. Not checked by a native speaker, not tested on phones. Review every line.
+
+Inline formatting: whole sentences are translated at once so meaning stays together (an earlier version translated the text between tags separately and lost a negation). Tags around a whole line are kept. Tags inside a sentence are dropped, the cue is marked "some tags were dropped", and the page asks before download.
+
+Not covered offline: Tamil, Telugu, Kannada, Bengali, Urdu, Portuguese, Malay and Tulu. A larger multilingual model (M2M100, MIT) was tried for Malayalam and crashed the browser tab on the 2 GB test machine, so it is not shipped. Telugu and Tulu are not in that model's language list.
 
 ## Build and test
 
