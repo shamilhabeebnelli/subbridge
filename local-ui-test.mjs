@@ -13,12 +13,13 @@ const tr = page.getByRole('button', { name: 'Translate', exact: true });
 const sup = () => page.locator('.support').innerText();
 const ok = (c, m) => { assert.ok(c, m); console.log('PASS', m); };
 await page.getByLabel('From language').selectOption('english'); await page.getByRole('checkbox').check();
-for (const [id, name] of [['malayalam', 'Malayalam'], ['tamil', 'Tamil'], ['telugu', 'Telugu'], ['tulu', 'Tulu']]) {
+for (const [id, name] of [['tamil', 'Tamil'], ['telugu', 'Telugu'], ['tulu', 'Tulu']]) {
   await page.getByLabel('To language').selectOption(id);
   ok(await tr.isDisabled() && /not (available offline|supported)|no engine/.test(await sup()), name + ' blocked in offline mode');
 }
-await page.getByLabel('To language').selectOption('malayalam');
-ok(/Offline mode only has Hindi, Arabic, French, Spanish, Chinese and Indonesian/.test(await sup()), 'blocked message names the six languages');
+await page.getByLabel('To language').selectOption('tamil');
+ok(/Offline mode only has Hindi, Malayalam, Arabic, French, Spanish, Chinese and Indonesian/.test(await sup()), 'blocked message names the seven languages');
+await page.getByLabel('To language').selectOption('malayalam'); await page.getByRole('checkbox').check(); ok(!(await tr.isDisabled()) && /Malayalam: translated on this device/.test(await sup()), 'Malayalam available offline'); await page.getByRole('checkbox').uncheck();
 await page.getByLabel('To language').selectOption('french');
 const t = await sup(); ok(/1\.5 GB/.test(t) && /phone/.test(t) && /Quality is not verified/.test(t) && /100 MB/.test(t), 'resource and quality warnings shown');
 ok(/downloaded from huggingface\.co/.test(await page.locator('label.check').innerText()), 'first-download consent text');
